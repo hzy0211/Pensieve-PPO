@@ -9,3 +9,8 @@ Pensieve-PPO/src/ppo/
 Pensieve-PPO/src/test_smo.py
 Pensieve-PPO/src/ppo-smo/
 Pensieve-PPO/src/ppo*/
+
+Pensieve-A3C/__pycache__
+Pensieve-A3C/*.pyc
+Pensieve-A3C/a3c*/
+Pensieve-A3C/test_results/
