@@ -29,7 +29,12 @@ PPO_TRAINING_EPO = 5
 if not os.path.exists(SUMMARY_DIR):
     os.makedirs(SUMMARY_DIR)
 
-NN_MODEL = None    
+NN_MODEL = None
+SR = False
+if len(sys.argv) >= 2 and sys.argv[1] == "SR":
+    SR = True
+    SUMMARY_DIR += '_sr'
+
 
 def testing(epoch, nn_model, log_file):
     # clean up the test results folder
@@ -39,7 +44,11 @@ def testing(epoch, nn_model, log_file):
     if not os.path.exists(TEST_LOG_FOLDER):
         os.makedirs(TEST_LOG_FOLDER)
     # run test script
-    os.system('python test.py ' + nn_model)
+    print("Testing!")
+    if SR:
+        os.system('python test.py ' + nn_model + ' SR')
+    else:
+        os.system('python test.py ' + nn_model)
 
     # append test performance to the log
     rewards, entropies = [], []
@@ -139,7 +148,7 @@ def central_agent(net_params_queues, exp_queues):
                 writer.flush()
 
 def agent(agent_id, net_params_queue, exp_queue):
-    env = ABREnv(agent_id)
+    env = ABREnv(agent_id, sr=SR)
     with tf.Session() as sess:
         actor = network.Network(sess,
                                 state_dim=S_DIM, action_dim=A_DIM,

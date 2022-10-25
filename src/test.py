@@ -14,7 +14,9 @@ S_LEN = 8  # take how many frames in the past
 A_DIM = 6
 ACTOR_LR_RATE = 0.0001
 CRITIC_LR_RATE = 0.001
-VIDEO_BIT_RATE = [300,750,1200,1850,2850,4300]  # Kbps
+VIDEO_BIT_RATE = [789, 1481, 2472, 4262, 7155, 7270]  # Kbps
+SR_QUALITY_FACTOR = [0.6, 0.65, 0.7, 0.8, 0.9, 1]
+RECOVERY_FACTOR = 0.5
 BUFFER_NORM_FACTOR = 10.0
 CHUNK_TIL_VIDEO_END_CAP = 48.0
 M_IN_K = 1000.0
@@ -25,8 +27,13 @@ RANDOM_SEED = 42
 RAND_RANGE = 1000
 LOG_FILE = './test_results/log_sim_ppo'
 TEST_TRACES = './test/'
+VIDEO_COUNT = 1
 # log in format of time_stamp bit_rate buffer_size rebuffer_time chunk_size download_time reward
 NN_MODEL = sys.argv[1]
+SR = False
+if len(sys.argv) >= 3 and sys.argv[2] == "SR":
+    SR = True
+    
     
 def main():
 
@@ -34,12 +41,12 @@ def main():
 
     assert len(VIDEO_BIT_RATE) == A_DIM
 
-    all_cooked_time, all_cooked_bw, all_file_names = load_trace.load_trace(TEST_TRACES)
+    all_cooked_bw = load_trace.load_trace()
 
-    net_env = env.Environment(all_cooked_time=all_cooked_time,
-                              all_cooked_bw=all_cooked_bw)
+    net_env = env.Environment(all_cooked_bw=all_cooked_bw,
+                              sr=SR)
 
-    log_path = LOG_FILE + '_' + all_file_names[net_env.trace_idx]
+    log_path = LOG_FILE
     log_file = open(log_path, 'w')
 
     with tf.Session() as sess:
@@ -66,6 +73,7 @@ def main():
 
         s_batch = [np.zeros((S_INFO, S_LEN))]
         a_batch = [action_vec]
+        reward_log = []
         r_batch = []
         entropy_record = []
         entropy_ = 0.5
@@ -76,19 +84,33 @@ def main():
             # this is to make the framework similar to the real
             delay, sleep_time, buffer_size, rebuf, \
             video_chunk_size, next_video_chunk_sizes, \
-            end_of_video, video_chunk_remain = \
+            end_of_video, video_chunk_remain, total_duration = \
                 net_env.get_video_chunk(bit_rate)
 
             time_stamp += delay  # in ms
             time_stamp += sleep_time  # in ms
-
+            
             # reward is video quality - rebuffer penalty - smoothness
-            reward = VIDEO_BIT_RATE[bit_rate] / M_IN_K \
+            if SR:
+                recovery = 0
+                if rebuf > 0:
+                    recovery = rebuf / total_duration
+                    print("rebuf: ", rebuf, VIDEO_BIT_RATE[-1] * SR_QUALITY_FACTOR[bit_rate] * recovery * RECOVERY_FACTOR / M_IN_K, REBUF_PENALTY * rebuf)
+                reward = VIDEO_BIT_RATE[-1] * SR_QUALITY_FACTOR[bit_rate] / M_IN_K \
+                        + VIDEO_BIT_RATE[-1] * SR_QUALITY_FACTOR[bit_rate] * recovery * RECOVERY_FACTOR / M_IN_K \
+                        - REBUF_PENALTY * rebuf \
+                        - SMOOTH_PENALTY * np.abs(VIDEO_BIT_RATE[-1] * SR_QUALITY_FACTOR[bit_rate] -
+                                               VIDEO_BIT_RATE[-1] * SR_QUALITY_FACTOR[last_bit_rate]) / M_IN_K
+            else:
+                if rebuf > 0:
+                    print("rebuf: ", rebuf)
+                reward = VIDEO_BIT_RATE[bit_rate] / M_IN_K \
                      - REBUF_PENALTY * rebuf \
                      - SMOOTH_PENALTY * np.abs(VIDEO_BIT_RATE[bit_rate] -
                                                VIDEO_BIT_RATE[last_bit_rate]) / M_IN_K
 
             r_batch.append(reward)
+            reward_log.append(reward)
 
             last_bit_rate = bit_rate
 
@@ -123,15 +145,13 @@ def main():
             action_prob = actor.predict(np.reshape(state, (1, S_INFO, S_LEN)))
             noise = np.random.gumbel(size=len(action_prob))
             bit_rate = np.argmax(np.log(action_prob) + noise)
+            print("bit_rate: ", bit_rate, " reward: ", reward)
             
             s_batch.append(state)
             entropy_ = -np.dot(action_prob, np.log(action_prob))
             entropy_record.append(entropy_)
 
             if end_of_video:
-                log_file.write('\n')
-                log_file.close()
-
                 last_bit_rate = DEFAULT_QUALITY
                 bit_rate = DEFAULT_QUALITY  # use the default action here
 
@@ -149,12 +169,13 @@ def main():
 
                 video_count += 1
 
-                if video_count >= len(all_file_names):
+                if video_count >= VIDEO_COUNT:
                     break
 
-                log_path = LOG_FILE + '_' + all_file_names[net_env.trace_idx]
-                log_file = open(log_path, 'w')
-
+                print("avg QoE: ", sum(reward_log) / len(reward_log))
+    
+    print("avg QoE: ", sum(reward_log) / len(reward_log))
+    log_file.close()
 
 if __name__ == '__main__':
     main()

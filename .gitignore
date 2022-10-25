@@ -8,3 +8,4 @@ src/*.tar.gz
 src/ppo/
 src/test_smo.py
 src/ppo-smo/
+src/ppo*/

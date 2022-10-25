@@ -10,7 +10,9 @@ S_LEN = 8  # take how many frames in the past
 A_DIM = 6
 TRAIN_SEQ_LEN = 100  # take as a train batch
 MODEL_SAVE_INTERVAL = 100
-VIDEO_BIT_RATE = np.array([300., 750., 1200., 1850., 2850., 4300.])  # Kbps
+VIDEO_BIT_RATE = np.array([789., 1481., 2472., 4262., 7155., 7270.])  # Kbps
+SR_QUALITY_FACTOR = [0.6, 0.65, 0.7, 0.8, 0.9, 1]
+RECOVERY_FACTOR = 0.5
 BUFFER_NORM_FACTOR = 10.0
 CHUNK_TIL_VIDEO_END_CAP = 48.0
 M_IN_K = 1000.0
@@ -24,13 +26,14 @@ EPS = 1e-6
 
 class ABREnv():
 
-    def __init__(self, random_seed=RANDOM_SEED):
+    def __init__(self, random_seed=RANDOM_SEED, sr=False):
         np.random.seed(random_seed)
-        all_cooked_time, all_cooked_bw, _ = load_trace.load_trace()
-        self.net_env = abrenv.Environment(all_cooked_time=all_cooked_time,
-                                          all_cooked_bw=all_cooked_bw,
-                                          random_seed=random_seed)
+        all_cooked_bw = load_trace.load_trace()
+        self.net_env = abrenv.Environment(all_cooked_bw=all_cooked_bw,
+                                          random_seed=random_seed,
+                                          sr=sr)
 
+        self.sr = sr
         self.last_bit_rate = DEFAULT_QUALITY
         self.buffer_size = 0.
         self.state = np.zeros((S_INFO, S_LEN))
@@ -47,7 +50,7 @@ class ABREnv():
         bit_rate = self.last_bit_rate
         delay, sleep_time, self.buffer_size, rebuf, \
             video_chunk_size, next_video_chunk_sizes, \
-            end_of_video, video_chunk_remain = \
+            end_of_video, video_chunk_remain, total_duration = \
             self.net_env.get_video_chunk(bit_rate)
         state = np.roll(self.state, -1, axis=1)
 
@@ -74,18 +77,26 @@ class ABREnv():
         # this is to make the framework similar to the real
         delay, sleep_time, self.buffer_size, rebuf, \
             video_chunk_size, next_video_chunk_sizes, \
-            end_of_video, video_chunk_remain = \
+            end_of_video, video_chunk_remain, total_duration = \
             self.net_env.get_video_chunk(bit_rate)
 
         self.time_stamp += delay  # in ms
         self.time_stamp += sleep_time  # in ms
-
+        
         # reward is video quality - rebuffer penalty - smooth penalty
-        reward = VIDEO_BIT_RATE[bit_rate] / M_IN_K \
-            - REBUF_PENALTY * rebuf \
-            - SMOOTH_PENALTY * np.abs(VIDEO_BIT_RATE[bit_rate] -
-                                      VIDEO_BIT_RATE[self.last_bit_rate]) / M_IN_K
-
+        if self.sr:
+            recovery = rebuf / total_duration
+            reward = VIDEO_BIT_RATE[-1] * SR_QUALITY_FACTOR[bit_rate] / M_IN_K \
+                    + VIDEO_BIT_RATE[-1] * SR_QUALITY_FACTOR[bit_rate] * recovery * RECOVERY_FACTOR / M_IN_K \
+                    - REBUF_PENALTY * rebuf \
+                    - SMOOTH_PENALTY * np.abs(VIDEO_BIT_RATE[-1] * SR_QUALITY_FACTOR[bit_rate] -
+                                            VIDEO_BIT_RATE[-1] * SR_QUALITY_FACTOR[self.last_bit_rate]) / M_IN_K
+        else:
+            reward = VIDEO_BIT_RATE[bit_rate] / M_IN_K \
+                    - REBUF_PENALTY * rebuf \
+                    - SMOOTH_PENALTY * np.abs(VIDEO_BIT_RATE[bit_rate] -
+                                            VIDEO_BIT_RATE[self.last_bit_rate]) / M_IN_K
+        
         self.last_bit_rate = bit_rate
         state = np.roll(self.state, -1, axis=1)
 
