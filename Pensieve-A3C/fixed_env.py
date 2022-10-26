@@ -149,3 +149,6 @@ class Environment:
             end_of_video, \
             video_chunk_remain, \
             total_duration
+
+    def get_total_video_chunk(self):
+        return self.video_len
